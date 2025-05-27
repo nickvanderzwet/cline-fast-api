@@ -17,6 +17,28 @@ if TYPE_CHECKING:
     from mysql.connector.pooling import PooledMySQLConnection
 
 
+# Response models for API endpoints
+class HealthResponse(BaseModel):
+    """Health check response model."""
+    status: str
+    database: str
+    models_generated: int
+
+
+class TableInfo(BaseModel):
+    """Table information model."""
+    table_name: str
+    endpoint: str
+    model_available: bool
+    fields: list[str] | None = None
+
+
+class TablesResponse(BaseModel):
+    """Tables info response model."""
+    total_tables: int
+    tables: list[TableInfo]
+
+
 def create_dynamic_endpoints(app: FastAPI) -> None:
     """
     Create dynamic API endpoints for all database tables.
@@ -60,7 +82,7 @@ def _create_table_endpoint(
         connection: "PooledMySQLConnection | MySQLConnectionAbstract" = Depends(
             get_database_connection
         ),
-    ) -> list[dict[str, Any]]:
+    ) -> list[BaseModel]:
         """
         Get all data from the specified table.
 
@@ -76,17 +98,19 @@ def _create_table_endpoint(
             # Cast to handle MySQL connector's complex return types
             raw_results = cast(list[dict[str, Any]], results)
 
-            # Validate data against the model
+            # Validate data against the model and return model instances
             validated_results = []
             for result in raw_results:
                 try:
                     # Create model instance to validate data
                     validated_item = model_class(**result)
-                    validated_results.append(validated_item.model_dump())
+                    validated_results.append(validated_item)
                 except Exception as validation_error:
                     print(f"Validation error for {table_name}: {validation_error}")
-                    # Include raw data if validation fails
-                    validated_results.append(result)
+                    # Create a generic model instance for invalid data
+                    from pydantic import create_model
+                    GenericModel = create_model('GenericModel', **{k: (type(v), v) for k, v in result.items()})
+                    validated_results.append(GenericModel(**result))
 
             return validated_results
 
@@ -104,9 +128,7 @@ def _create_table_endpoint(
         path=f"/{table_name}",
         endpoint=get_table_data,
         methods=["GET"],
-        response_model=list[
-            dict[str, Any]
-        ],  # Use dict instead of model_class for type safety
+        response_model=list[model_class],  # Use the actual model class for proper OpenAPI schema
         tags=[table_name],
         summary=f"Get all {table_name} records",
         description=f"Retrieve all records from the {table_name} table",
@@ -121,8 +143,8 @@ def add_health_endpoint(app: FastAPI) -> None:
         app: FastAPI application instance
     """
 
-    @app.get("/health", tags=["health"])
-    async def health_check() -> dict[str, Any]:
+    @app.get("/health", tags=["health"], response_model=HealthResponse)
+    async def health_check() -> HealthResponse:
         """Health check endpoint."""
         try:
             # Test database connection
@@ -133,11 +155,11 @@ def add_health_endpoint(app: FastAPI) -> None:
             connection.ping(reconnect=True)
             connection.close()
 
-            return {
-                "status": "healthy",
-                "database": "connected",
-                "models_generated": len(model_generator.get_all_models()),
-            }
+            return HealthResponse(
+                status="healthy",
+                database="connected",
+                models_generated=len(model_generator.get_all_models()),
+            )
 
         except Exception as e:
             raise HTTPException(
@@ -153,8 +175,8 @@ def add_tables_info_endpoint(app: FastAPI) -> None:
         app: FastAPI application instance
     """
 
-    @app.get("/tables", tags=["info"])
-    async def get_tables_info() -> dict[str, Any]:
+    @app.get("/tables", tags=["info"], response_model=TablesResponse)
+    async def get_tables_info() -> TablesResponse:
         """Get information about available tables and their models."""
         try:
             with SchemaExtractor() as extractor:
@@ -164,7 +186,7 @@ def add_tables_info_endpoint(app: FastAPI) -> None:
 
             tables_info = []
             for table_name in table_names:
-                table_info = {
+                table_info_data = {
                     "table_name": table_name,
                     "endpoint": f"/{table_name}",
                     "model_available": table_name in models,
@@ -172,11 +194,14 @@ def add_tables_info_endpoint(app: FastAPI) -> None:
 
                 if table_name in models:
                     model_class = models[table_name]
-                    table_info["fields"] = list(model_class.model_fields.keys())
+                    table_info_data["fields"] = list(model_class.model_fields.keys())
+                else:
+                    table_info_data["fields"] = None
 
+                table_info = TableInfo(**table_info_data)
                 tables_info.append(table_info)
 
-            return {"total_tables": len(table_names), "tables": tables_info}
+            return TablesResponse(total_tables=len(table_names), tables=tables_info)
 
         except Exception as e:
             raise HTTPException(
