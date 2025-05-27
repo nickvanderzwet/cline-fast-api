@@ -1,6 +1,6 @@
 """Dynamic API endpoint generation."""
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Type, cast
 
 import mysql.connector
 from fastapi import Depends, FastAPI, HTTPException
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 # Response models for API endpoints
 class HealthResponse(BaseModel):
     """Health check response model."""
+
     status: str
     database: str
     models_generated: int
@@ -27,6 +28,7 @@ class HealthResponse(BaseModel):
 
 class TableInfo(BaseModel):
     """Table information model."""
+
     table_name: str
     endpoint: str
     model_available: bool
@@ -35,6 +37,7 @@ class TableInfo(BaseModel):
 
 class TablesResponse(BaseModel):
     """Tables info response model."""
+
     total_tables: int
     tables: list[TableInfo]
 
@@ -67,7 +70,7 @@ def create_dynamic_endpoints(app: FastAPI) -> None:
 
 
 def _create_table_endpoint(
-    app: FastAPI, table_name: str, model_class: type[BaseModel]
+    app: FastAPI, table_name: str, model_class: Type[BaseModel]
 ) -> None:
     """
     Create a GET endpoint for a specific table.
@@ -107,9 +110,12 @@ def _create_table_endpoint(
                     validated_results.append(validated_item)
                 except Exception as validation_error:
                     print(f"Validation error for {table_name}: {validation_error}")
-                    # Create a generic model instance for invalid data
-                    from pydantic import create_model
-                    GenericModel = create_model('GenericModel', **{k: (type(v), v) for k, v in result.items()})
+                    # For invalid data, create a simple BaseModel instance with the raw data
+                    # This avoids the create_model type checking issues while maintaining functionality
+                    class GenericModel(BaseModel):
+                        class Config:
+                            extra = "allow"
+                    
                     validated_results.append(GenericModel(**result))
 
             return validated_results
@@ -128,7 +134,7 @@ def _create_table_endpoint(
         path=f"/{table_name}",
         endpoint=get_table_data,
         methods=["GET"],
-        response_model=list[model_class],  # Use the actual model class for proper OpenAPI schema
+        response_model=list[model_class],  # type: ignore[valid-type]
         tags=[table_name],
         summary=f"Get all {table_name} records",
         description=f"Retrieve all records from the {table_name} table",
@@ -186,19 +192,19 @@ def add_tables_info_endpoint(app: FastAPI) -> None:
 
             tables_info = []
             for table_name in table_names:
-                table_info_data = {
-                    "table_name": table_name,
-                    "endpoint": f"/{table_name}",
-                    "model_available": table_name in models,
-                }
+                model_available = table_name in models
+                fields: list[str] | None = None
 
-                if table_name in models:
+                if model_available:
                     model_class = models[table_name]
-                    table_info_data["fields"] = list(model_class.model_fields.keys())
-                else:
-                    table_info_data["fields"] = None
+                    fields = list(model_class.model_fields.keys())
 
-                table_info = TableInfo(**table_info_data)
+                table_info = TableInfo(
+                    table_name=table_name,
+                    endpoint=f"/{table_name}",
+                    model_available=model_available,
+                    fields=fields,
+                )
                 tables_info.append(table_info)
 
             return TablesResponse(total_tables=len(table_names), tables=tables_info)
