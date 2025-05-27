@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
+
 from app.main import create_app
 
 
@@ -22,4 +23,3 @@ def mock_db_connection():
     """Mock database connection for testing."""
     # This would be implemented with proper mocking
     # when actual tests are written
-    pass

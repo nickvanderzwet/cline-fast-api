@@ -16,9 +16,11 @@ repos:
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.7.1
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies: [types-all]
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
         args: [--ignore-missing-imports]

@@ -1,14 +1,20 @@
 """Dynamic API endpoint generation."""
 
-from typing import List, Any, Dict
-from fastapi import FastAPI, Depends, HTTPException
-from fastapi.routing import APIRoute
+from typing import TYPE_CHECKING, Any, cast
+
 import mysql.connector
-from app.core.database import get_db_connection
-from app.core.exceptions import DatabaseConnectionError, TableNotFoundError
-from app.services.schema_extractor import SchemaExtractor
-from app.services.model_generator import model_generator
+from fastapi import Depends, FastAPI, HTTPException
+from pydantic import BaseModel
+
 from app.api.dependencies import get_database_connection
+from app.core.database import get_db_connection
+from app.core.exceptions import DatabaseConnectionError
+from app.services.model_generator import model_generator
+from app.services.schema_extractor import SchemaExtractor
+
+if TYPE_CHECKING:
+    from mysql.connector.abstracts import MySQLConnectionAbstract
+    from mysql.connector.pooling import PooledMySQLConnection
 
 
 def create_dynamic_endpoints(app: FastAPI) -> None:
@@ -38,7 +44,9 @@ def create_dynamic_endpoints(app: FastAPI) -> None:
         raise
 
 
-def _create_table_endpoint(app: FastAPI, table_name: str, model_class) -> None:
+def _create_table_endpoint(
+    app: FastAPI, table_name: str, model_class: type[BaseModel]
+) -> None:
     """
     Create a GET endpoint for a specific table.
 
@@ -49,8 +57,10 @@ def _create_table_endpoint(app: FastAPI, table_name: str, model_class) -> None:
     """
 
     async def get_table_data(
-        connection: mysql.connector.MySQLConnection = Depends(get_database_connection),
-    ) -> List[Dict[str, Any]]:
+        connection: "PooledMySQLConnection | MySQLConnectionAbstract" = Depends(
+            get_database_connection
+        ),
+    ) -> list[dict[str, Any]]:
         """
         Get all data from the specified table.
 
@@ -63,9 +73,12 @@ def _create_table_endpoint(app: FastAPI, table_name: str, model_class) -> None:
             results = cursor.fetchall()
             cursor.close()
 
+            # Cast to handle MySQL connector's complex return types
+            raw_results = cast(list[dict[str, Any]], results)
+
             # Validate data against the model
             validated_results = []
-            for result in results:
+            for result in raw_results:
                 try:
                     # Create model instance to validate data
                     validated_item = model_class(**result)
@@ -78,9 +91,9 @@ def _create_table_endpoint(app: FastAPI, table_name: str, model_class) -> None:
             return validated_results
 
         except mysql.connector.Error as e:
-            raise HTTPException(status_code=500, detail=f"Database error: {e}")
+            raise HTTPException(status_code=500, detail=f"Database error: {e}") from e
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+            raise HTTPException(status_code=500, detail=f"Unexpected error: {e}") from e
 
     # Set function metadata for better API documentation
     get_table_data.__name__ = f"get_{table_name}_data"
@@ -91,7 +104,9 @@ def _create_table_endpoint(app: FastAPI, table_name: str, model_class) -> None:
         path=f"/{table_name}",
         endpoint=get_table_data,
         methods=["GET"],
-        response_model=List[model_class],
+        response_model=list[
+            dict[str, Any]
+        ],  # Use dict instead of model_class for type safety
         tags=[table_name],
         summary=f"Get all {table_name} records",
         description=f"Retrieve all records from the {table_name} table",
@@ -107,7 +122,7 @@ def add_health_endpoint(app: FastAPI) -> None:
     """
 
     @app.get("/health", tags=["health"])
-    async def health_check():
+    async def health_check() -> dict[str, Any]:
         """Health check endpoint."""
         try:
             # Test database connection
@@ -125,7 +140,9 @@ def add_health_endpoint(app: FastAPI) -> None:
             }
 
         except Exception as e:
-            raise HTTPException(status_code=503, detail=f"Service unhealthy: {e}")
+            raise HTTPException(
+                status_code=503, detail=f"Service unhealthy: {e}"
+            ) from e
 
 
 def add_tables_info_endpoint(app: FastAPI) -> None:
@@ -137,7 +154,7 @@ def add_tables_info_endpoint(app: FastAPI) -> None:
     """
 
     @app.get("/tables", tags=["info"])
-    async def get_tables_info():
+    async def get_tables_info() -> dict[str, Any]:
         """Get information about available tables and their models."""
         try:
             with SchemaExtractor() as extractor:
@@ -164,4 +181,4 @@ def add_tables_info_endpoint(app: FastAPI) -> None:
         except Exception as e:
             raise HTTPException(
                 status_code=500, detail=f"Error getting tables info: {e}"
-            )
+            ) from e

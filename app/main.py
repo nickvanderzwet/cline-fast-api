@@ -2,12 +2,14 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.config import settings
+
 from app.api.endpoints import (
-    create_dynamic_endpoints,
     add_health_endpoint,
     add_tables_info_endpoint,
+    create_dynamic_endpoints,
 )
+from app.core.config import settings
+from app.core.database import wait_for_db
 
 
 def create_app() -> FastAPI:
@@ -30,7 +32,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=["*"],
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET"],  # Only allow GET methods for read-only API
         allow_headers=["*"],
     )
 
@@ -40,8 +42,17 @@ def create_app() -> FastAPI:
     # Add tables info endpoint
     add_tables_info_endpoint(app)
 
-    # Create dynamic endpoints for database tables
-    create_dynamic_endpoints(app)
+    # Wait for database to be available before creating dynamic endpoints
+    print("Waiting for database connection...")
+    if wait_for_db(max_wait_time=60):
+        try:
+            create_dynamic_endpoints(app)
+            print("Dynamic endpoints created successfully")
+        except Exception as e:
+            print(f"Error creating dynamic endpoints: {e}")
+            # Continue without dynamic endpoints - health check will still work
+    else:
+        print("Database not available - starting without dynamic endpoints")
 
     return app
 

@@ -1,11 +1,17 @@
 """FastAPI dependencies."""
 
-from fastapi import Depends, HTTPException
+from collections.abc import Generator
+
+from mysql.connector.abstracts import MySQLConnectionAbstract
+from mysql.connector.pooling import PooledMySQLConnection
+
 from app.core.database import get_db_connection, test_db_connection
 from app.core.exceptions import DatabaseConnectionError
 
 
-def get_database_connection():
+def get_database_connection() -> (
+    Generator[PooledMySQLConnection | MySQLConnectionAbstract, None, None]
+):
     """
     FastAPI dependency to get database connection.
 
@@ -26,7 +32,7 @@ def get_database_connection():
             connection.close()
 
 
-def verify_database_health():
+def verify_database_health() -> None:
     """
     FastAPI dependency to verify database health.
 

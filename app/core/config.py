@@ -1,6 +1,6 @@
 """Configuration management using Pydantic Settings."""
 
-from typing import List
+
 from pydantic_settings import BaseSettings
 
 
@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     db_port: int = 3306
     db_user: str = "root"
     db_password: str = "password"
-    db_name: str
+    db_name: str = "example"
 
     # API configuration
     excluded_tables: str = ""
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     version: str = "1.0.0"
 
     @property
-    def excluded_tables_list(self) -> List[str]:
+    def excluded_tables_list(self) -> list[str]:
         """Get excluded tables as a list."""
         if not self.excluded_tables:
             return []

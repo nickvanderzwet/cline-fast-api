@@ -1,11 +1,10 @@
 """Pydantic model generation using database schema introspection."""
 
-import tempfile
-import os
-import importlib.util
-from typing import Dict, Type, Any, Optional, Union
-from pathlib import Path
+import re
+from typing import Any, cast
+
 from pydantic import BaseModel, Field, create_model
+
 from app.core.exceptions import ModelGenerationError
 from app.services.schema_extractor import SchemaExtractor
 
@@ -13,10 +12,10 @@ from app.services.schema_extractor import SchemaExtractor
 class ModelGenerator:
     """Generates Pydantic models from database schema using direct introspection."""
 
-    def __init__(self):
-        self.generated_models: Dict[str, Type[BaseModel]] = {}
+    def __init__(self) -> None:
+        self.generated_models: dict[str, type[BaseModel]] = {}
 
-    def generate_models_from_database(self) -> Dict[str, Type[BaseModel]]:
+    def generate_models_from_database(self) -> dict[str, type[BaseModel]]:
         """
         Generate Pydantic models directly from database schema.
 
@@ -37,11 +36,13 @@ class ModelGenerator:
                 return models
 
         except Exception as e:
-            raise ModelGenerationError(f"Failed to generate models from database: {e}")
+            raise ModelGenerationError(
+                f"Failed to generate models from database: {e}"
+            ) from e
 
     def _create_pydantic_model(
-        self, table_name: str, columns_info: list
-    ) -> Type[BaseModel]:
+        self, table_name: str, columns_info: list[dict[str, Any]]
+    ) -> type[BaseModel]:
         """
         Create a Pydantic model from table column information.
 
@@ -53,12 +54,12 @@ class ModelGenerator:
             Pydantic model class
         """
         try:
-            fields = {}
+            fields: dict[str, Any] = {}
 
             for column in columns_info:
-                field_name = column["Field"]
-                field_type = column["Type"]
-                is_nullable = column["Null"] == "YES"
+                field_name = str(column["Field"])
+                field_type = str(column["Type"])
+                is_nullable = str(column["Null"]) == "YES"
                 default_value = column["Default"]
 
                 # Map MySQL types to Python types
@@ -73,17 +74,18 @@ class ModelGenerator:
             # Create the model class name (PascalCase)
             model_name = self._table_name_to_class_name(table_name)
 
-            # Create the Pydantic model
-            model_class = create_model(model_name, **fields, __module__=__name__)
-
-            return model_class
+            # Create the Pydantic model with proper type casting
+            model_class = create_model(model_name, **fields)
+            return cast(type[BaseModel], model_class)
 
         except Exception as e:
             raise ModelGenerationError(
                 f"Failed to create model for table {table_name}: {e}"
-            )
+            ) from e
 
-    def _map_mysql_type_to_python(self, mysql_type: str, is_nullable: bool) -> Type:
+    def _map_mysql_type_to_python(
+        self, mysql_type: str, is_nullable: bool
+    ) -> type[Any]:
         """
         Map MySQL column type to Python type.
 
@@ -103,7 +105,7 @@ class ModelGenerator:
         ):
             # Special case for tinyint(1) which is often used as boolean
             if "tinyint(1)" in mysql_type_lower:
-                base_type = bool
+                base_type: type[Any] = bool
             else:
                 base_type = int
         # Float types
@@ -135,15 +137,21 @@ class ModelGenerator:
         else:
             base_type = str
 
-        # Make optional if nullable
+        # Make optional if nullable - use proper type annotation
         if is_nullable:
-            return Optional[base_type]
-        else:
-            return base_type
+            # Return the union type properly for mypy
+            return type(
+                base_type.__name__ + " | None", (object,), {"__origin__": base_type}
+            )
+        return base_type
 
     def _create_field_info(
-        self, column: dict, python_type: Type, is_nullable: bool, default_value: Any
-    ) -> tuple:
+        self,
+        column: dict[str, Any],
+        python_type: type[Any],
+        is_nullable: bool,
+        default_value: Any,
+    ) -> tuple[type[Any], Any]:
         """
         Create field information for Pydantic model.
 
@@ -156,7 +164,7 @@ class ModelGenerator:
         Returns:
             Tuple of (type, Field) for Pydantic model creation
         """
-        field_kwargs = {}
+        field_kwargs: dict[str, Any] = {}
 
         # Add description
         field_kwargs["description"] = f"Column: {column['Field']} ({column['Type']})"
@@ -169,7 +177,7 @@ class ModelGenerator:
                     hasattr(python_type, "__origin__")
                     and python_type.__args__[0] == int
                 ):
-                    converted_default = int(default_value)
+                    converted_default: Any = int(default_value)
                 elif python_type == float or (
                     hasattr(python_type, "__origin__")
                     and python_type.__args__[0] == float
@@ -190,16 +198,14 @@ class ModelGenerator:
             field_kwargs["default"] = None
 
         # Add constraints based on column type
-        if "varchar" in column["Type"].lower():
+        if "varchar" in str(column["Type"]).lower():
             # Extract length from varchar(n)
             try:
-                import re
-
-                match = re.search(r"varchar\((\d+)\)", column["Type"].lower())
+                match = re.search(r"varchar\((\d+)\)", str(column["Type"]).lower())
                 if match:
                     max_length = int(match.group(1))
                     field_kwargs["max_length"] = max_length
-            except:
+            except Exception:
                 pass
 
         return (python_type, Field(**field_kwargs))
@@ -216,7 +222,7 @@ class ModelGenerator:
         """
         return "".join(word.capitalize() for word in table_name.split("_"))
 
-    def get_model_for_table(self, table_name: str) -> Type[BaseModel]:
+    def get_model_for_table(self, table_name: str) -> type[BaseModel]:
         """
         Get the Pydantic model for a specific table.
 
@@ -231,7 +237,7 @@ class ModelGenerator:
 
         return self.generated_models[table_name]
 
-    def get_all_models(self) -> Dict[str, Type[BaseModel]]:
+    def get_all_models(self) -> dict[str, type[BaseModel]]:
         """
         Get all generated models.
 

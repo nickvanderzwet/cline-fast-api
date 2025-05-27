@@ -1,43 +1,54 @@
 """Database schema extraction utilities."""
 
-from typing import List, Dict, Any
-import mysql.connector
+from typing import TYPE_CHECKING, Any, cast
+
 from mysql.connector import Error
-from app.core.database import get_db_connection
+
 from app.core.config import settings
+from app.core.database import get_db_connection
 from app.core.exceptions import DatabaseConnectionError, SchemaExtractionError
+
+if TYPE_CHECKING:
+    from mysql.connector.abstracts import MySQLConnectionAbstract
+    from mysql.connector.pooling import PooledMySQLConnection
 
 
 class SchemaExtractor:
     """Extracts database schema information for model generation."""
 
-    def __init__(self):
-        self.connection = None
+    def __init__(self) -> None:
+        self.connection: "PooledMySQLConnection | MySQLConnectionAbstract | None" = None
 
-    def __enter__(self):
+    def __enter__(self) -> "SchemaExtractor":
         self.connection = get_db_connection()
         if self.connection is None:
             raise DatabaseConnectionError()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         if self.connection and self.connection.is_connected():
             self.connection.close()
 
-    def get_table_names(self) -> List[str]:
+    def get_table_names(self) -> list[str]:
         """
         Get list of table names from the database, excluding configured tables.
 
         Returns:
             List of table names
         """
+        if self.connection is None:
+            raise DatabaseConnectionError("No database connection available")
+
         try:
             cursor = self.connection.cursor()
             cursor.execute(
                 f"SELECT table_name FROM information_schema.tables "
                 f"WHERE table_schema = '{settings.db_name}'"
             )
-            all_tables = [table[0] for table in cursor.fetchall()]
+            results = cursor.fetchall()
+            # Cast to handle MySQL connector's complex return types
+            # MySQL connector returns tuples when using regular cursor
+            all_tables = [str(cast(tuple[Any, ...], row)[0]) for row in results]
 
             # Filter out excluded tables
             excluded = settings.excluded_tables_list
@@ -47,7 +58,7 @@ class SchemaExtractor:
             return tables
 
         except Error as e:
-            raise SchemaExtractionError(f"Failed to get table names: {e}")
+            raise SchemaExtractionError(f"Failed to get table names: {e}") from e
 
     def get_table_schema_ddl(self, table_name: str) -> str:
         """
@@ -59,6 +70,9 @@ class SchemaExtractor:
         Returns:
             CREATE TABLE DDL statement
         """
+        if self.connection is None:
+            raise DatabaseConnectionError("No database connection available")
+
         try:
             cursor = self.connection.cursor()
             cursor.execute(f"SHOW CREATE TABLE {table_name}")
@@ -66,14 +80,18 @@ class SchemaExtractor:
             cursor.close()
 
             if result:
-                return result[1]  # The CREATE TABLE statement
-            else:
-                raise SchemaExtractionError(f"No schema found for table {table_name}")
+                # Cast to handle MySQL connector's complex return types
+                # MySQL connector returns tuples when using regular cursor
+                return str(
+                    cast(tuple[Any, ...], result)[1]
+                )  # The CREATE TABLE statement
+
+            raise SchemaExtractionError(f"No schema found for table {table_name}")
 
         except Error as e:
             raise SchemaExtractionError(
                 f"Failed to get schema for table {table_name}: {e}"
-            )
+            ) from e
 
     def get_all_schemas_ddl(self) -> str:
         """
@@ -91,7 +109,7 @@ class SchemaExtractor:
 
         return "\n\n".join(ddl_statements)
 
-    def get_table_columns_info(self, table_name: str) -> List[Dict[str, Any]]:
+    def get_table_columns_info(self, table_name: str) -> list[dict[str, Any]]:
         """
         Get detailed column information for a table.
 
@@ -101,14 +119,20 @@ class SchemaExtractor:
         Returns:
             List of column information dictionaries
         """
+        if self.connection is None:
+            raise DatabaseConnectionError("No database connection available")
+
         try:
             cursor = self.connection.cursor(dictionary=True)
             cursor.execute(f"DESCRIBE {table_name}")
-            columns = cursor.fetchall()
+            results = cursor.fetchall()
             cursor.close()
-            return columns
+
+            # Cast to handle MySQL connector's complex return types
+            # When using dictionary=True, MySQL connector returns list of dicts
+            return cast(list[dict[str, Any]], results)
 
         except Error as e:
             raise SchemaExtractionError(
                 f"Failed to get columns for table {table_name}: {e}"
-            )
+            ) from e

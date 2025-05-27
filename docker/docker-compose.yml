@@ -14,18 +14,29 @@ services:
       DB_NAME: example
       EXCLUDED_TABLES: user
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     volumes:
       - ../app:/app/app  # Mount for development
+    restart: unless-stopped
+
   db:
     image: mysql:8.0
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: example
     ports:
-      - "3307:3306"
+      - "3307:3306"  # Use port 3307 to avoid conflicts
     volumes:
       - db_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword"]
+      timeout: 20s
+      retries: 10
+      interval: 10s
+      start_period: 40s
+    restart: unless-stopped
+
 volumes:
   db_data:
