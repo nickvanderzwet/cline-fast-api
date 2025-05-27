@@ -1,7 +1,9 @@
 version: "3.9"
 services:
   api:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -10,15 +12,18 @@ services:
       DB_USER: root
       DB_PASSWORD: password
       DB_NAME: example
+      EXCLUDED_TABLES: user
     depends_on:
       - db
+    volumes:
+      - ../app:/app/app  # Mount for development
   db:
     image: mysql:8.0
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: example
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - db_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql

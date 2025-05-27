@@ -1,0 +1,43 @@
+# Ruff configuration file
+target-version = "py311"
+line-length = 88
+indent-width = 4
+
+[lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # Pyflakes
+    "UP", # pyupgrade
+    "B",  # flake8-bugbear
+    "SIM", # flake8-simplify
+    "I",  # isort
+    "N",  # pep8-naming
+    "C4", # flake8-comprehensions
+    "PIE", # flake8-pie
+    "T20", # flake8-print
+    "RET", # flake8-return
+    "TCH", # flake8-type-checking
+    "PTH", # flake8-use-pathlib
+]
+
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+    "T201",  # print found
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"test_*.py" = ["T201", "S101"]
+"tests/*.py" = ["T201", "S101"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[lint.isort]
+known-first-party = ["app"]
